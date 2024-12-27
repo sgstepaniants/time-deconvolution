@@ -1,27 +1,30 @@
-import math
-import numpy as np
-import scipy
-from pykeops.numpy import LazyTensor
 
-def mobius(theta):
-    return np.real(1j*(1-np.exp(1j*theta))/(1+np.exp(1j*theta)))
-
-def mobius_inv(x):
-    z = (1j - x)/(1j + x)
-    return np.arctan2(np.imag(z), np.real(z))
-
-# c1 and b are assumed to be positive
-# computing the inverse of dynamical system c1s - c0 - \sum_i b_i/(s + a_i)
-def B_R_discrete(c0, c1, a, b):
+'''
+# a, b define the weights and atoms of a discrete distribution lambda on the circle
+# alpha is a grid
+# c1, and b are assumed to be positive, and Im(c0) >= 0
+# lambda is extended to (lambda + c1*delta_{-1}) + iH[lambda + c1*delta_{-1}] - ic0 on the circle
+# and its inverse on the circle is given by (mu + zeta1*delta_{-1}) + iH[mu + zeta1*delta_{-1}] - izeta0
+def B_real_discrete(a, b, c0, c1, alphas=None):
     n = len(a)
     assert(len(b) == n)
     assert(np.all(b >= 0))
     assert(c1 >= 0)
     
+    c0_re = np.real(c0)
+    c0_im = np.imag(c0)
+    assert(c0_im >= 0)
+    
     sorted_inds = np.argsort(a)
     a = a[sorted_inds]
     b = b[sorted_inds]
     
+    if c0_im > 0:
+        assert(alphas is not None)
+        H = 1/math.pi*np.sum(b[None, :]/(alphas[:, None]-a[None, :]), axis=1)
+        return B_real_continuous(alphas, None, a, b, c0, c1, H=H)
+    
+    print("performing discrete root-finding")
     alphas = np.zeros(n-1)
     diffs = np.diff(a)
     for i in range(n-1):
@@ -36,15 +39,15 @@ def B_R_discrete(c0, c1, a, b):
                 return -np.infty
             else:
                 y = diffs[i]*x + a[i]
-                return np.sum(b/(y-a)) - (c1*y + c0)
+                return np.sum(b/(y-a)) - (c1*y + c0_re)
         root = scipy.optimize.brentq(f, 0, 1, args=i)
         alphas[i] = diffs[i]*root + a[i]
     
-    if c0 < 0 or c1 > 0:
+    if c0_re < 0 or c1 > 0:
         def f(x):
             if x == a[0]:
                 return -np.inf
-            return np.sum(b/(x - a)) - (c1*x + c0)
+            return np.sum(b/(x - a)) - (c1*x + c0_re)
         root_found = False
         k = 1
         while not root_found:
@@ -57,11 +60,11 @@ def B_R_discrete(c0, c1, a, b):
         except:
             print("no left root")
             pass
-    if c0 > 0 or c1 > 0:
+    if c0_re > 0 or c1 > 0:
         def f(x):
             if x == a[-1]:
                 return np.inf
-            return np.sum(b/(x - a)) - (c1*x + c0)
+            return np.sum(b/(x - a)) - (c1*x + c0_re)
         root_found = False
         k = 1
         while not root_found:
@@ -78,8 +81,8 @@ def B_R_discrete(c0, c1, a, b):
     if c1 > 0:
         zeta0 = 0
         zeta1 = 0
-    elif c0 != 0:
-        zeta0 = -np.pi**2/c0
+    elif c0_re != 0:
+        zeta0 = -np.pi**2/c0_re
         zeta1 = 0
     else:
         m0_lmbda = np.sum(b)
@@ -88,8 +91,10 @@ def B_R_discrete(c0, c1, a, b):
         zeta1 = np.pi**2/m0_lmbda
     
     betas = np.pi**2/(c1 + np.sum(b[:, None]/(a[:, None] - alphas[None, :])**2, axis=0))
-    return zeta0, zeta1, alphas, betas
+    return alphas, betas, zeta0, zeta1
+'''
 
+"""
 def hilbert_transform(f, X, dX, Y=None, fc=None, Xc=None, eps=1e-7, lazy=True):
     if X.ndim == 1:
         X = X[None, :]
@@ -130,16 +135,4 @@ def hilbert_transform(f, X, dX, Y=None, fc=None, Xc=None, eps=1e-7, lazy=True):
             k[np.abs(d) <= eps] = 0
             Hf += k/math.pi
     return Hf
-
-def exp_kernel(alphas, betas, t, quadrature=False):
-    squeeze = len(alphas.shape) == 1
-    if squeeze:
-        alphas = alphas[None, :]
-        betas = betas[None, :]
-    dy = np.ones(alphas.shape[0])
-    if quadrature:
-        dy = alphas[:, 1] - alphas[:, 0]
-    kernels = np.sum(betas[:, :, None] * np.exp(-alphas[:, :, None] * t[None, None, :]) * dy[:, None, None], axis=1)
-    if squeeze:
-        kernels = np.squeeze(kernels, axis=0)
-    return kernels
+"""
