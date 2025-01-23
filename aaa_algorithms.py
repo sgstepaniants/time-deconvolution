@@ -46,7 +46,7 @@ def rescale_rootfind(func, interval, root_tol=1e-15):
         return root/(1-np.abs(root)) if result.converged and root != -1 and root != 1 else None
 
 # AAA rational approximation, taken from Scipy documentation and Chebfun
-def aaa(z, f, rtol=None, max_terms=99):
+def aaa(f, z, rtol=None, max_terms=99):
     M = np.size(z)
     mask = np.ones(M, dtype=np.bool_)
     dtype = np.result_type(z, f, 1.0)
@@ -161,17 +161,70 @@ def aaa(z, f, rtol=None, max_terms=99):
     return pol, res, zer, zj, fj, wj
 
 # Accepts a function u, performs AAA rational approximation on the interval [a, b] with N points,
+# and extends u to the entire complex plane
+def analytic_continuation(us, zs, aaa_iters=100):
+    pol, res, _, _, _, _ = aaa(us, zs, max_terms=aaa_iters)
+    f = lambda x: np.sum(res/(x[:, None] - pol), axis=1)
+    return f, pol, res
+
+def expE1(x):
+    y = np.exp(x) * scipy.special.exp1(x)
+    
+    a1 = 8.5733287401
+    a2 = 18.0590169730
+    a3 = 8.6347608925
+    a4 = 0.2677737343
+    b1 = 9.5733223454
+    b2 = 25.6329561486
+    b3 = 21.0996530827
+    b4 = 3.9584969228
+    xf = x[~np.isfinite(y)]
+    y[~np.isfinite(y)] = (xf**4 + a1*xf**3 + a2*xf**2 + a3*xf + a4)/(xf**5 + b1*xf**4 + b2*xf**3 + b3*xf**2 + b4*xf)
+    return y
+
+# us is a function u(z) sampled at the points zs
+# real_symm encodes whether u is a real function sampled on the real axis
+def laplace_transform(us, zs, aaa_iters=100, real_symm=True, max_exp=0):
+    pol, res, _, _, _, _ = aaa(us*np.exp(-zs*max_exp), zs, max_terms=aaa_iters)
+    if real_symm:
+        def Lu(s):
+            arr = expE1(-(s-max_exp)[:, None]*pol) @ res
+            return (arr + arr.conj())/2
+    else:
+        Lu = lambda s: expE1(-(s-max_exp)[:, None]*pol) @ res
+    return Lu
+
+# Lus is a Laplace transform of u(z) sampled at the points zs
+# real_symm encodes whether u is a real function sampled on the real axis
+def inverse_laplace_transform(Lus, zs, aaa_iters=100, real_symm=True, max_exp=0):
+    pol, res, _, _, _, _ = aaa(Lus, zs, max_terms=aaa_iters)
+    pol = -pol
+    res = res[np.real(pol) >= -max_exp]
+    pol = pol[np.real(pol) >= -max_exp]
+    if real_symm:
+        res = np.append(res, res.conj())/2
+        pol = np.append(pol, pol.conj())
+    u = lambda t: np.exp(-t[:, None]*pol) @ res
+    return u, pol, res
+
+# us is a function u(z) sampled at the points zs
+# real_symm encodes whether u is a real function sampled on the real axis
+# Returns a complex exponential sum that approximates u(z)
+def aaa_exp_sum(us, zs, s, aaa_iters=100, real_symm=True, max_exp=0):
+    Lu = laplace_transform(us, zs, aaa_iters=aaa_iters, real_symm=real_symm, max_exp=max_exp)
+    return inverse_laplace_transform(Lu(s), s, aaa_iters=aaa_iters, real_symm=real_symm, max_exp=max_exp)
+
+# Accepts a function u, performs AAA rational approximation,
 # and returns the Hilbert transform of u on the real line
-def continuous_hilbert_transform(u, zs, aaa_iters=99):
-    u_eval = u(zs)
-    pol, _, _, _, _, _ = aaa(zs, u_eval, max_terms=aaa_iters)
+def continuous_hilbert_transform(us, zs, aaa_iters=100):
+    pol, _, _, _, _, _ = aaa(us, zs, max_terms=aaa_iters)
 
     pol = pol[np.imag(pol) < 0]
     d = np.min(np.abs(zs - pol[:, None]), axis=1)
     
     A = d / (zs[:, None] - pol)
     A = np.concatenate([np.real(A), -np.imag(A)], axis=1)
-    c = np.reshape(np.linalg.lstsq(A, u_eval, rcond=None)[0], (-1, 2), order='F') @ np.array([1, 1j])
+    c = np.reshape(np.linalg.lstsq(A, us, rcond=None)[0], (-1, 2), order='F') @ np.array([1, 1j])
 
     f = lambda x: np.sum((c*d) / (x[:, None] - pol), axis=1)
     Hu = lambda x: np.imag(f(x))
@@ -198,7 +251,7 @@ class HilbertTransform:
         # Continuous part of Hilbert transform (of continuous density of lambda), using AAA rational approximation
         self.H_cont = lambda x: np.zeros_like(x)
         if self.lmbda.density is not None:
-            self.H_cont = continuous_hilbert_transform(self.lmbda.density, self.aaa_samples, self.aaa_iters)
+            self.H_cont = continuous_hilbert_transform(self.lmbda.density(self.aaa_samples), self.aaa_samples, self.aaa_iters)
     
     def __call__(self, x):
         scalar = False

@@ -47,8 +47,9 @@ class Distribution:
         assert(len(atoms) == len(atom_wts))
         
         sorted_inds = np.argsort(atoms)
+        sorted_inds = sorted_inds[atom_wts[sorted_inds] != 0]
         self.atoms = atoms[sorted_inds]
-        self.num_atoms = len(atoms)
+        self.num_atoms = len(self.atoms)
         self.atom_wts = atom_wts[sorted_inds]
         
         assert(np.all(np.diff(quad_pts) > 0))
@@ -75,7 +76,8 @@ class Distribution:
             self.zero_sets = zero_sets
             return
         
-        '''
+        self.zero_sets = None
+        
         # If lambda is a discrete measure define zero sets of lambda to be the intervals between its atoms
         if self.density is None and self.num_atoms > 0:
             zero_sets = np.zeros((self.num_atoms+1, 2))
@@ -84,25 +86,23 @@ class Distribution:
             if self.num_atoms > 1:
                 for i in range(self.num_atoms-1):
                     zero_sets[i+1, :] = [self.atoms[i], self.atoms[i+1]]
+            self.zero_sets = zero_sets
         elif self.density is not None:
-        '''
-        # Define zero sets where density is zero and where the measure has no atoms
-        # Assume that outside of quadrature points, density is zero
-        pts = np.array([]) if self.density is None else self.quad_pts
-        vals = np.array([]) if self.density is None else self.density_vals
-        pts = np.concatenate([pts, self.atoms[self.atom_wts != 0], [-np.inf, np.inf]])
-        vals = np.concatenate([self.density_vals, np.ones(np.sum(self.atom_wts != 0)), [0, 0]])
-        
-        sorted_inds = np.argsort(pts)
-        pts = pts[sorted_inds]
-        vals = vals[sorted_inds]
-        
-        start_inds = np.where(np.diff((vals == 0).astype(int)) > 0)[0]
-        end_inds = np.where(np.diff((vals == 0).astype(int)) < 0)[0]+1
-        
-        start_inds = np.insert(start_inds, 0, 0)
-        end_inds = np.append(end_inds, len(pts)-1)
-        self.zero_sets = np.row_stack([pts[start_inds], pts[end_inds]]).T
+            # Define zero sets where density is zero and where the measure has no atoms
+            # Assume that outside of quadrature points, density is zero
+            pts = np.concatenate([self.quad_pts, self.atoms[self.atom_wts != 0], [-np.inf, np.inf]])
+            vals = np.concatenate([self.density_vals, np.ones(np.sum(self.atom_wts != 0)), [0, 0]])
+            
+            sorted_inds = np.argsort(pts)
+            pts = pts[sorted_inds]
+            vals = vals[sorted_inds]
+            
+            start_inds = np.where(np.diff((vals == 0).astype(int)) > 0)[0]
+            end_inds = np.where(np.diff((vals == 0).astype(int)) < 0)[0]+1
+            
+            start_inds = np.insert(start_inds, 0, 0)
+            end_inds = np.append(end_inds, len(pts)-1)
+            self.zero_sets = np.row_stack([pts[start_inds], pts[end_inds]]).T
     
     def update_quadrature(self, quad_pts, quad_wts, update_zero_sets=True):
         self.quad_pts = quad_pts
