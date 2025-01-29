@@ -131,12 +131,12 @@ def volterra_cm_numerical_inversion(lmbda, c0, c1, t, method=None):
     
     print(f"Solving numerically with {method} method")
     
-    zeta0, zeta1 = volterra_cm_spectral_inversion(lmbda, c0, c1, H=None, compute_mu=False)
+    zeta0, zeta1 = B_real(lmbda, c0, c1, H=None, compute_mu=False)
     if c1 > 0:
-        # Solve integrodifferential Volterra equation c1*Jdot = c0*J + K*J, J(0) = -1/c1
+        # Solve integrodifferential Volterra equation c1*Jdot = c0*J + K*J, J(0) = pi^2/c1
         K = lambda t: -exp_kernel(lmbda, t)
         y = lambda t: 0
-        J = solve_volterra_integrodiff(K, -c0, c1, y, -1/c1, t, method)
+        J = solve_volterra_integrodiff(K, -c0, c1, y, math.pi**2/c1, t, method)
     elif c0 != 0:
         K = exp_kernel(lmbda, t)
         # Solve Volterra equation of second type -zeta0*K = c0*J + K*J
@@ -165,12 +165,12 @@ def volterra_pd_numerical_inversion(lmbda, c0, c1, t, method=None):
     if method is None:
         method = "trapezoid" if c1 == 0 else "integration"
     
-    zeta0, zeta1 = volterra_pd_spectral_inversion(lmbda, c0, c1, H=None, compute_mu=False)
+    zeta0, zeta1 = B_real(lmbda, c0, c1, H=None, compute_mu=False)
     if c1 > 0:
-        # Solve integrodifferential Volterra equation c1*Jdot = ic0*J - K*J, J(0) = 1/c1
+        # Solve integrodifferential Volterra equation c1*Jdot = ic0*J - K*J, J(0) = pi^2/c1
         K = lambda t: complex_exp_kernel(lmbda, t)
         y = lambda t: 0
-        J = solve_volterra_integrodiff(K, -1j*c0, c1, y, 1/c1, t, method)
+        J = solve_volterra_integrodiff(K, -1j*c0, c1, y, math.pi**2/c1, t, method)
     elif c0 != 0:
         # Solve Volterra equation of second type izeta0*K = -ic0*J + K*J
         K = complex_exp_kernel(lmbda, t)

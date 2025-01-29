@@ -22,7 +22,7 @@ def density_2(x):
 lmbda_2 = Distribution(density_2, np.array([]), np.array([]), quad_pts, quad_wts)
 
 quad_pts, quad_wts = trap_quad(-10, 30, 2000)
-density_3 = lambda x: np.exp(-0.8*np.abs(x-5))
+density_3 = lambda x: np.exp(-1*np.abs(x-6))
 atoms_3 = np.array([3, 5, 7])
 atom_wts_3 = np.array([0.3, 0.4, 0.2])
 lmbda_3 = Distribution(density_3, atoms_3, atom_wts_3, quad_pts, quad_wts)

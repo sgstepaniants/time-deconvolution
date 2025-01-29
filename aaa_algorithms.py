@@ -94,7 +94,7 @@ def aaa(f, z, rtol=None, max_terms=99):
             wj = (V.conj()[mm, :].sum(axis=0) / np.sqrt(mm.sum())).astype(dtype)
         else:
             # Fewer rows than columns
-            V = scipy.linalg.null_space(A[mask, : m + 1], check_finite=False)
+            V = scipy.linalg.null_space(A[mask, : m + 1])
             nm = V.shape[-1]
             # Aim for non-sparse wt vector
             wj = V.sum(axis=-1) / np.sqrt(nm)
@@ -277,6 +277,8 @@ class HilbertTransform:
         roots = np.array([])
         for i in range(self.lmbda.zero_sets.shape[0]):
            root = rescale_rootfind(func, self.lmbda.zero_sets[i, :])
+           if root is None and self.lmbda.zero_sets[i, 0] == self.lmbda.zero_sets[i, 1]:
+               root = self.lmbda.zero_sets[i, 0]
            if root is not None:
                roots = np.append(roots, root)
         return roots

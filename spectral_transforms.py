@@ -7,7 +7,7 @@ import torch.optim as optim
 from pykeops.numpy import LazyTensor
 
 from aaa_algorithms import HilbertTransform, aaa_exp_sum
-from probability import Distribution, symmetrize_dist
+from probability import Distribution, symmetrize_dist, remove_small_masses
 
 def mobius(theta):
     return np.real(1j*(1-np.exp(1j*theta))/(1+np.exp(1j*theta)))
@@ -19,7 +19,7 @@ def mobius_inv(x):
 # alphas is a grid, b_grid indicates the continuous density part of lambda on this grid
 # a, b are the atoms and weights of the discrete part of lambda
 # the density of lambda does not need to be compactly supported but needs to decay at infinity
-def B_real(lmbda, c0, c1, H=None, compute_mu=True):
+def B_real(lmbda, c0, c1, H=None, compute_mu=True, thresh=1e-15):
     assert(np.all(lmbda.quad_wts >= 0))
     assert(np.all(lmbda.atom_wts >= 0))
     
@@ -28,6 +28,8 @@ def B_real(lmbda, c0, c1, H=None, compute_mu=True):
     c0_re = np.real(c0)
     c0_im = np.imag(c0)
     assert(c0_im >= 0)
+    
+    lmbda = remove_small_masses(lmbda, thresh)
     
     mu_density = None
     alpha_disc = np.array([])
@@ -108,9 +110,11 @@ def B_real(lmbda, c0, c1, H=None, compute_mu=True):
 def exp_kernel(lmbda, t, deriv_order=0):
     kernel = np.zeros(len(t))
     if lmbda.num_atoms > 0:
-        kernel += np.sum(lmbda.atom_wts*(-lmbda.atoms)**deriv_order*np.exp(-lmbda.atoms*t[:, None]), axis=1)
+        inds = lmbda.atom_wts != 0
+        kernel += np.sum(lmbda.atom_wts[inds]*(-lmbda.atoms[inds])**deriv_order*np.exp(-lmbda.atoms[inds]*t[:, None]), axis=1)
     if lmbda.density is not None:
-        kernel += np.sum(lmbda.quad_wts*(-lmbda.quad_pts)**deriv_order*lmbda.density_vals*np.exp(-lmbda.quad_pts*t[:, None]), axis=1)
+        inds = lmbda.density_vals != 0
+        kernel += np.sum(lmbda.quad_wts[inds]*(-lmbda.quad_pts[inds])**deriv_order*lmbda.density_vals[inds]*np.exp(-lmbda.quad_pts[inds]*t[:, None]), axis=1)
     return kernel
 
 def complex_exp_kernel(lmbda, t, deriv_order=0):
@@ -123,26 +127,26 @@ def complex_exp_kernel(lmbda, t, deriv_order=0):
 
 # Invert the Volterra equation y = c1*xdot - c0*x - K*x
 # into x = zeta1*ydot - zeta0*y - J*y where K and J are bilateral Laplace transforms of lmbda and mu respectively
-def volterra_cm_spectral_inversion(lmbda, c0, c1, H=None, compute_mu=True):
-    assert(np.isreal(c0))
-    if compute_mu:
-        mu, zeta0, zeta1 = B_real(lmbda, c0, c1, H, compute_mu)
-        mu.rescale(-1/math.pi**2)
-        return mu, -zeta0/math.pi**2, -zeta1/math.pi**2
-    else:
-        zeta0, zeta1 = B_real(lmbda, c0, c1, H, compute_mu)
-        return -zeta0/math.pi**2, -zeta1/math.pi**2
+#def volterra_cm_spectral_inversion(lmbda, c0, c1, H=None, compute_mu=True):
+#    assert(np.isreal(c0))
+#    if compute_mu:
+#        mu, zeta0, zeta1 = B_real(lmbda, c0, c1, H, compute_mu)
+#        mu.rescale(-1/math.pi**2)
+#        return mu, -zeta0/math.pi**2, -zeta1/math.pi**2
+#    else:
+#        zeta0, zeta1 = B_real(lmbda, c0, c1, H, compute_mu)
+#        return -zeta0/math.pi**2, -zeta1/math.pi**2
 
 # Invert the Volterra equation y = c1*xdot - c0*x + K*x
 # into x = zeta1*ydot - zeta0*y + J*y where K and J are Fourier transforms of lmbda and mu respectively
-def volterra_pd_spectral_inversion(lmbda, c0, c1, H=None, compute_mu=True):
-    if compute_mu:
-        mu, zeta0, zeta1 = B_real(lmbda, c0, c1, H, compute_mu)
-        mu.rescale(1/math.pi**2)
-        return mu, zeta0/math.pi**2, zeta1/math.pi**2
-    else:
-        zeta0, zeta1 = B_real(lmbda, c0, c1, H, compute_mu)
-        return zeta0/math.pi**2, zeta1/math.pi**2
+#def volterra_pd_spectral_inversion(lmbda, c0, c1, H=None, compute_mu=True):
+#    if compute_mu:
+#        mu, zeta0, zeta1 = B_real(lmbda, c0, c1, H, compute_mu)
+#        mu.rescale(1/math.pi**2)
+#        return mu, zeta0/math.pi**2, zeta1/math.pi**2
+#    else:
+#        zeta0, zeta1 = B_real(lmbda, c0, c1, H, compute_mu)
+#        return zeta0/math.pi**2, zeta1/math.pi**2
 
 def fit_cosine_sum(x, t, n, omegas_init=None, betas_init=None, opt_iter=1000, omega_min=0, omega_max=np.inf, omega_init_scale=1):
     if omegas_init is None:
@@ -192,7 +196,7 @@ def fit_exp_sum(x, t, n, init="random", opt_iter=1000, lr=1e-2):
         _, pol, res = aaa_exp_sum(x, t, s, aaa_iters=n, real_symm=False, max_exp=0.0)
         #assert(np.all(np.abs(np.imag(pol)) < 1e-10))
         #assert(np.all(np.abs(np.imag(res)) < 1e-10))
-        omegas = np.zeros(max(len(pol), n))
+        omegas = np.tan(np.linspace(0, np.pi/2, n))
         betas = np.zeros(max(len(pol), n))
         omegas[:len(pol)] = np.real(pol)
         betas[:len(pol)] = np.real(res)
@@ -246,10 +250,18 @@ def fit_cos_sum(x, t, n, init="dct", omega_init_min=None, omega_init_max=None, o
         betas = np.linalg.lstsq(A, x, rcond=None)[0]
         betas[betas < 0] = 0
     elif init == "dct":
-        x_interp = np.interp(np.linspace(tmin, tmax, n), t, x)
-        omegas = math.pi*(2*np.arange(n)+1)/(2*n*dt)
-        betas = (1/n)*scipy.fft.dct(x_interp, type=3, norm=None, orthogonalize=False)
-        betas[betas < 0] = 0
+        if n > len(t):
+            print("DCT with n > len(t) will cause aliasing")
+        if n == 1:
+            omegas = np.array([2*math.pi/(tmax - tmin)])
+            betas = np.array([1])
+        else:
+            t_new = np.linspace(tmin, tmax, n)
+            dt_new = t_new[1] - t_new[0]
+            x_interp = np.interp(t_new, t, x)
+            omegas = math.pi*(2*np.arange(n)+1)/(2*n*dt_new)
+            betas = (1/n)*scipy.fft.dct(x_interp, type=3, norm=None, orthogonalize=False)
+            betas[betas < 0] = 0
     else:
         raise ValueError("Initialization method")
     

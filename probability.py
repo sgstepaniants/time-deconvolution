@@ -42,7 +42,7 @@ def symmetrize_dist(a, b, halve_center=False):
     return symm_a, symm_b
 
 class Distribution:
-    def __init__(self, density=None, atoms=np.array([]), atom_wts=np.array([]), quad_pts=np.array([]), quad_wts=np.array([]), zero_sets=None):
+    def __init__(self, density=None, atoms=np.array([]), atom_wts=np.array([]), quad_pts=np.array([]), quad_wts=np.array([]), zero_sets=None, full_support=False):
         assert(len(quad_pts) == len(quad_wts))
         assert(len(atoms) == len(atom_wts))
         
@@ -62,6 +62,9 @@ class Distribution:
         if self.density is not None and len(self.quad_pts) == 0:
             print("Density constructed, quadrature not set")
         
+        if full_support and density is None:
+            raise ValueError("Atomic distribution cannot have full support")
+        self.full_support = full_support
         self.update_zero_sets(zero_sets)
     
     def rescale(self, scale):
@@ -72,11 +75,13 @@ class Distribution:
             self.density_vals *= scale
     
     def update_zero_sets(self, zero_sets=None):
+        if self.full_support:
+            self.zero_sets = np.zeros((0, 2))
+            return
+        
         if zero_sets is not None:
             self.zero_sets = zero_sets
             return
-        
-        self.zero_sets = None
         
         # If lambda is a discrete measure define zero sets of lambda to be the intervals between its atoms
         if self.density is None and self.num_atoms > 0:
@@ -137,3 +142,16 @@ class Distribution:
         if self.num_atoms > 0:
             res += np.sum(self.atom_wts[:, None]*((self.atoms[:, None] - offset[None, :])**k), axis=0)
         return res
+
+def remove_small_masses(lmbda, thresh):
+    density_thresh = None
+    if lmbda.density is not None:
+        def density_thresh(x):
+            y = lmbda.density(x)
+            return y * (np.abs(y) >= thresh)
+    
+    atoms_thresh = lmbda.atoms[lmbda.atom_wts >= thresh]
+    atom_wts_thresh = lmbda.atom_wts[lmbda.atom_wts >= thresh]
+    
+    lmbda_thresh = Distribution(density_thresh, atoms_thresh, atom_wts_thresh, lmbda.quad_pts, lmbda.quad_wts, None, lmbda.full_support)
+    return lmbda_thresh
