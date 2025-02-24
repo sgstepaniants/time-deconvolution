@@ -1,9 +1,13 @@
+import math
 import numpy as np
 import scipy
-from spectral_transforms import *
-from idesolver import IDESolver
-from symengine import Symbol, Function
-from jitcdde import jitcdde, y as y_sym, t as t_sym, quadrature
+from scipy.integrate import solve_ivp
+#from idesolver import IDESolver
+#from symengine import Symbol, Function
+#from jitcdde import jitcdde, y as y_sym, t as t_sym, quadrature
+
+import spectral_transforms
+from kernels import exp_kernel, complex_exp_kernel
 
 def trap_quad(a, b, n):
     assert(n > 1)
@@ -11,6 +15,13 @@ def trap_quad(a, b, n):
     quad_pts = np.linspace(a, b, n)
     quad_wts = (b-a)/(n-1)*np.ones(n)
     quad_wts[[0, -1]] /= 2
+    return quad_pts, quad_wts
+
+def fourier_quad(a, b, n):
+    assert(n > 1)
+    assert(a < b)
+    quad_pts = np.linspace(a, a+(b-a)*(n-1)/n, n)
+    quad_wts = np.ones(n) * (b-a)/n
     return quad_pts, quad_wts
 
 def leggauss_quad(a, b, n):
@@ -72,6 +83,7 @@ def solve_volterra(K, c0, y, t, method="righthand"):
     
     return x
 
+'''
 # Solve y = c1xdot + c0x + K*x, x(0) = x0 for x
 # K and y must be functions of one variable, c0, c1, and x0 are scalars
 def solve_volterra_integrodiff(K, c0, c1, y, x0, t, method="iterative", maxiters=100, nsteps=20):
@@ -122,21 +134,65 @@ def solve_volterra_integrodiff(K, c0, c1, y, x0, t, method="iterative", maxiters
         raise ValueError("Method must be iterative or integration.")
     
     return x
+'''
+
+# Solve y = c1xdot + c0x + K*x, x(0) = x0 for x
+# K and y must be functions of one variable, c0, c1, and x0 are scalars
+def solve_volterra_integrodiff(K, c0, c1, y, x0, t, Tmax = 10, max_step=1e-2, gauss_nodes=20):
+    if not callable(K):
+        Kf = lambda tmpt: np.interp(tmpt, t, K)
+    else:
+        Kf = K
+    if not callable(y):
+        #print(t.shape)
+        #print(t.dtype)
+        #print(y.shape)
+        #print(y.dtype)
+        yf = lambda tmpt: np.interp(tmpt, t, y)
+    else:
+        yf = y
+    
+    def integral_equation(t, x, t_past, x_past, c0, c1, yf):
+        t_past.append(t)
+        x_past.append(x[0])
+        t_past = np.array(t_past)
+        x_past = np.array(x_past)
+        
+        conv = 0
+        if len(t_past) > 1:
+            tmpts = t_past[t_past >= t-Tmax]
+            kernel = Kf(t - tmpts)
+            past = x_past[t_past >= t-Tmax]
+            
+            func = lambda p: np.interp(p, tmpts, past*kernel)
+            conv = scipy.integrate.fixed_quad(func, tmpts[0], tmpts[-1], n=min(len(tmpts), gauss_nodes))[0]
+        dydt = (-c0*x - conv + yf(t))/c1
+
+        return dydt
+
+    # Initialize a list to store past values
+    t_past = []
+    x_past = []
+    
+    if np.isscalar(x0):
+        x0 = np.array([x0])
+
+    sol = solve_ivp(integral_equation, [t[0], t[-1]], x0, method='RK45', t_eval=t, args=(t_past, x_past, c0, c1, yf), max_step=max_step)
+    return sol.y[0]
 
 # Invert the Volterra equation y = c1*xdot - c0*x - K*x
 # into x = zeta1*ydot - zeta0*y - J*y where K and J are bilateral Laplace transforms of lmbda and mu respectively
-def volterra_cm_numerical_inversion(lmbda, c0, c1, t, method=None):
-    if method is None:
-        method = "trapezoid" if c1 == 0 else "integration"
+def volterra_cm_numerical_inversion(lmbda, c0, c1, t, method=None, max_step=1e-2, gauss_nodes=20):
+    method = "trapezoid" if c1 == 0 and method is None else "gauss integration"
     
     print(f"Solving numerically with {method} method")
     
-    zeta0, zeta1 = B_real(lmbda, c0, c1, H=None, compute_mu=False)
+    zeta0, zeta1 = spectral_transforms.B_real(lmbda, c0, c1, H=None, compute_mu=False)
     if c1 > 0:
         # Solve integrodifferential Volterra equation c1*Jdot = c0*J + K*J, J(0) = pi^2/c1
         K = lambda t: -exp_kernel(lmbda, t)
         y = lambda t: 0
-        J = solve_volterra_integrodiff(K, -c0, c1, y, math.pi**2/c1, t, method)
+        J = solve_volterra_integrodiff(K, -c0, c1, y, math.pi**2/c1, t, max_step=max_step, gauss_nodes=gauss_nodes)
     elif c0 != 0:
         K = exp_kernel(lmbda, t)
         # Solve Volterra equation of second type -zeta0*K = c0*J + K*J
@@ -161,16 +217,16 @@ def volterra_cm_resolvent_eq_error(K, c0, c1, J, zeta0, zeta1, t):
 
 # Invert the Volterra equation y = c1*xdot - c0*x + K*x
 # into x = zeta1*ydot - zeta0*y + J*y where K and J are Fourier transforms of lmbda and mu respectively
-def volterra_pd_numerical_inversion(lmbda, c0, c1, t, method=None):
+def volterra_pd_numerical_inversion(lmbda, c0, c1, t, method=None, max_step=1e-2, gauss_nodes=20):
     if method is None:
-        method = "trapezoid" if c1 == 0 else "integration"
+        method = "trapezoid" if c1 == 0 and method is None else "gauss integration"
     
-    zeta0, zeta1 = B_real(lmbda, c0, c1, H=None, compute_mu=False)
+    zeta0, zeta1 = spectral_transforms.B_real(lmbda, c0, c1, H=None, compute_mu=False)
     if c1 > 0:
         # Solve integrodifferential Volterra equation c1*Jdot = ic0*J - K*J, J(0) = pi^2/c1
         K = lambda t: complex_exp_kernel(lmbda, t)
         y = lambda t: 0
-        J = solve_volterra_integrodiff(K, -1j*c0, c1, y, math.pi**2/c1, t, method)
+        J = solve_volterra_integrodiff(K, -1j*c0, c1, y, math.pi**2/c1, t, max_step=max_step, gauss_nodes=gauss_nodes)
     elif c0 != 0:
         # Solve Volterra equation of second type izeta0*K = -ic0*J + K*J
         K = complex_exp_kernel(lmbda, t)

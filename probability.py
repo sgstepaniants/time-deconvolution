@@ -1,6 +1,5 @@
 import numpy as np
 
-
 def inverse_cdf(alpha, beta, x):
     n_pieces = len(alpha)
     beta_cumsum = np.insert(np.cumsum(beta), 0, 0)
@@ -42,19 +41,30 @@ def symmetrize_dist(a, b, halve_center=False):
     return symm_a, symm_b
 
 class Distribution:
-    def __init__(self, density=None, atoms=np.array([]), atom_wts=np.array([]), quad_pts=np.array([]), quad_wts=np.array([]), zero_sets=None, full_support=False):
+    def __init__(self, density=None, atoms=np.array([]), atom_wts=np.array([]), quad_pts=np.array([]), quad_wts=np.array([]), zero_sets=None, full_support=False, periodic_domain=None):
         assert(len(quad_pts) == len(quad_wts))
         assert(len(atoms) == len(atom_wts))
         
         sorted_inds = np.argsort(atoms)
         sorted_inds = sorted_inds[atom_wts[sorted_inds] != 0]
-        self.atoms = atoms[sorted_inds]
+        self.atoms = atoms[sorted_inds].astype(np.float64)
         self.num_atoms = len(self.atoms)
         self.atom_wts = atom_wts[sorted_inds]
         
-        assert(np.all(np.diff(quad_pts) > 0))
-        self.quad_pts = quad_pts
-        self.quad_wts = quad_wts
+        sorted_inds = np.argsort(quad_pts)
+        sorted_inds = sorted_inds[quad_wts[sorted_inds] != 0]
+        self.quad_pts = quad_pts[sorted_inds].astype(np.float64)
+        self.quad_wts = quad_wts[sorted_inds]
+        assert(np.all(np.diff(self.quad_pts) > 0))
+        
+        self.periodic_domain = None
+        if periodic_domain is not None:
+            assert(np.all(self.atoms >= periodic_domain[0]))
+            assert(np.all(self.atoms < periodic_domain[1]))
+            assert(np.all(self.quad_pts >= periodic_domain[0]))
+            assert(np.all(self.quad_pts < periodic_domain[1]))
+            assert(~np.logical_xor(*np.isfinite(periodic_domain)))
+            self.periodic_domain = periodic_domain
         
         self.density = density
         self.density_vals = np.array([]) if density is None else self.density(self.quad_pts)
@@ -75,39 +85,61 @@ class Distribution:
             self.density_vals *= scale
     
     def update_zero_sets(self, zero_sets=None):
+        # If full support, then lmbda is zero nowhere
         if self.full_support:
             self.zero_sets = np.zeros((0, 2))
             return
         
+        # If zero_sets is specified, then define it as specified
         if zero_sets is not None:
             self.zero_sets = zero_sets
             return
         
         # If lambda is a discrete measure define zero sets of lambda to be the intervals between its atoms
-        if self.density is None and self.num_atoms > 0:
-            zero_sets = np.zeros((self.num_atoms+1, 2))
-            zero_sets[0, :] = [-np.inf, self.atoms[0]]
-            zero_sets[-1, :] = [self.atoms[-1], np.inf]
-            if self.num_atoms > 1:
-                for i in range(self.num_atoms-1):
-                    zero_sets[i+1, :] = [self.atoms[i], self.atoms[i+1]]
-            self.zero_sets = zero_sets
-        elif self.density is not None:
-            # Define zero sets where density is zero and where the measure has no atoms
-            # Assume that outside of quadrature points, density is zero
-            pts = np.concatenate([self.quad_pts, self.atoms[self.atom_wts != 0], [-np.inf, np.inf]])
-            vals = np.concatenate([self.density_vals, np.ones(np.sum(self.atom_wts != 0)), [0, 0]])
+        #if self.density is None and self.num_atoms > 0:
+        #    if self.periodic_domain is None:
+        #        zero_sets = np.zeros((self.num_atoms+1, 2))
+        #        zero_sets[0, :] = [-np.inf, self.atoms[0]]
+        #        zero_sets[-1, :] = [self.atoms[-1], np.inf]
+        #        
+        #        if self.num_atoms > 1:
+        #            for i in range(self.num_atoms-1):
+        #                zero_sets[i+1, :] = [self.atoms[i], self.atoms[i+1]]
+        #        self.zero_sets = zero_sets
             
-            sorted_inds = np.argsort(pts)
-            pts = pts[sorted_inds]
-            vals = vals[sorted_inds]
-            
-            start_inds = np.where(np.diff((vals == 0).astype(int)) > 0)[0]
-            end_inds = np.where(np.diff((vals == 0).astype(int)) < 0)[0]+1
-            
-            start_inds = np.insert(start_inds, 0, 0)
-            end_inds = np.append(end_inds, len(pts)-1)
-            self.zero_sets = np.row_stack([pts[start_inds], pts[end_inds]]).T
+        #elif self.density is not None:
+        
+        # Define zero sets where density is zero and where the measure has no atoms
+        # Assume that outside of quadrature points, density is zero
+        if self.density is None:
+            zero_sets = np.array([[-np.inf, np.inf]])
+        else:
+            pts = np.concatenate(([-np.inf, -np.inf], self.quad_pts, [np.inf, np.inf]))
+            vals = np.concatenate(([1, 0], self.density_vals, [0, 1]))
+            start_inds = np.where(np.diff((vals == 0).astype(int)) == 1)[0]
+            end_inds = np.where(np.diff((vals == 0).astype(int)) == -1)[0]+1
+            zero_sets = np.row_stack([pts[start_inds], pts[end_inds]]).T
+        
+        # Divide up these preliminary zero sets further based on where lmbda has atoms
+        new_zero_sets = np.zeros((0, 2))
+        for i in range(zero_sets.shape[0]):
+            atoms_i = self.atoms[np.logical_and(self.atoms > zero_sets[i, 0], self.atoms < zero_sets[i, 1])]
+            atoms_i = np.repeat(atoms_i, 2)
+            atoms_i = np.insert(atoms_i, 0, zero_sets[i, 0])
+            atoms_i = np.append(atoms_i, zero_sets[i, 1])
+            new_zero_sets = np.concatenate((new_zero_sets, np.reshape(atoms_i, (-1, 2))))
+        
+        # If lmbda is periodic, wrap the last zero set around
+        if self.periodic_domain is not None:
+            if new_zero_sets.shape[0] == 1:
+                new_zero_sets = np.array([[self.periodic_domain[0], self.periodic_domain[1]]])
+            else:
+                first_pt = new_zero_sets[0, 1]
+                last_pt = new_zero_sets[-1, 0]
+                if first_pt != self.periodic_domain[0] or last_pt != self.periodic_domain[1]:
+                    per = self.periodic_domain[1] - self.periodic_domain[0]
+                    new_zero_sets = np.concatenate((new_zero_sets[1:-1, :], [[last_pt, first_pt + per]]))
+        self.zero_sets = new_zero_sets
     
     def update_quadrature(self, quad_pts, quad_wts, update_zero_sets=True):
         self.quad_pts = quad_pts
@@ -117,30 +149,51 @@ class Distribution:
         if update_zero_sets:
             self.update_zero_sets()
     
-    def update_density(self, density, update_zero_sets=True):
-        if density is not None:
-            self.density = density
-            self.density_vals = self.density(self.quad_pts)
-        else:
-            self.density = None
-            self.density_vals = np.array([])
-        if update_zero_sets:
-            self.update_zero_sets()
+    #def update_density(self, density, update_zero_sets=True):
+    #    if density is not None:
+    #        self.density = density
+    #        self.density_vals = self.density(self.quad_pts)
+    #    else:
+    #        self.density = None
+    #        self.density_vals = np.array([])
+    #    if update_zero_sets:
+    #        self.update_zero_sets()
     
     def moment(self, k):
         res = 0
         if self.density is not None:
-            res += np.sum(self.quad_wts*self.density_vals*(self.quad_pts**k))
+            if self.periodic_domain is None:
+                res += np.sum(self.quad_wts*self.density_vals*(self.quad_pts**k))
+            else:
+                per = self.periodic_domain[1] - self.periodic_domain[0]
+                res += np.sum(self.quad_wts/per*self.density_vals*np.exp(1j*k*self.quad_pts))
         if self.num_atoms > 0:
-            res += np.sum(self.atom_wts*(self.atoms**k))
+            if self.periodic_domain is None:
+                res += np.sum(self.atom_wts*(self.atoms**k))
+            else:
+                res += np.sum(self.atom_wts*np.exp(1j*k*self.atoms))
         return res
     
     def offset_moments(self, offset, k):
+        if self.periodic_domain is not None:
+            assert(k < 0)
+        
         res = np.zeros_like(offset)
         if self.density is not None:
-            res += np.sum(self.quad_wts[:, None]*self.density_vals[:, None]*((self.quad_pts[:, None] - offset[None, :])**k), axis=0)
+            if self.periodic_domain is None:
+                res += np.sum(self.quad_wts[:, None]*self.density_vals[:, None]*((self.quad_pts[:, None] - offset[None, :])**k), axis=0)
+            else:
+                per = self.periodic_domain[1] - self.periodic_domain[0]
+                z_pts = np.exp(1j*self.quad_pts)
+                z_offset = np.exp(1j*offset)
+                res += np.real(np.sum(self.quad_wts[:, None]/per*self.density_vals[:, None]*(-4*z_pts[:, None]*z_offset[None, :]*(z_pts[:, None] - z_offset[None, :])**k), axis=0))
         if self.num_atoms > 0:
-            res += np.sum(self.atom_wts[:, None]*((self.atoms[:, None] - offset[None, :])**k), axis=0)
+            if self.periodic_domain is None:
+                res += np.sum(self.atom_wts[:, None]*((self.atoms[:, None] - offset[None, :])**k), axis=0)
+            else:
+                z_pts = np.exp(1j*self.atoms)
+                z_offset = np.exp(1j*offset)
+                res += np.real(np.sum(self.atom_wts[:, None]*(-4*z_pts[:, None]*z_offset[None, :]*(z_pts[:, None] - z_offset[None, :])**k), axis=0))
         return res
 
 def remove_small_masses(lmbda, thresh):
@@ -153,5 +206,14 @@ def remove_small_masses(lmbda, thresh):
     atoms_thresh = lmbda.atoms[lmbda.atom_wts >= thresh]
     atom_wts_thresh = lmbda.atom_wts[lmbda.atom_wts >= thresh]
     
-    lmbda_thresh = Distribution(density_thresh, atoms_thresh, atom_wts_thresh, lmbda.quad_pts, lmbda.quad_wts, None, lmbda.full_support)
+    lmbda_thresh = Distribution(density_thresh, atoms_thresh, atom_wts_thresh, lmbda.quad_pts, lmbda.quad_wts, None, lmbda.full_support, lmbda.periodic_domain)
     return lmbda_thresh
+
+def sigma_int(lmbda):
+    assert(lmbda.periodic_domain is None)
+    res = 0
+    if lmbda.density is not None:
+        res -= np.sum(lmbda.quad_wts*lmbda.density_vals*lmbda.quad_pts/(1+lmbda.quad_pts**2))/np.pi
+    if lmbda.num_atoms > 0:
+        res -= np.sum(lmbda.atom_wts*lmbda.atoms/(1+lmbda.atoms**2))/np.pi
+    return res
