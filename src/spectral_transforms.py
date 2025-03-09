@@ -9,7 +9,7 @@ import torch.optim as optim
 from .aaa_algorithms import aaa_exp_sum
 from .hilbert_transform import HilbertTransform
 from .probability import Distribution, remove_small_masses, sigma_int, xi_frac
-from .numerical import trap_quad, fourier_quad
+from .numerical import trap_quad, trap_quad_gen, fourier_quad
 
 # phi map that takes circle angle theta in [-pi, pi] to real line x in (-infty, infty)
 def mobius(theta):
@@ -20,7 +20,8 @@ def mobius_inv(x):
     z = (1j - x)/(1j + x)
     return np.arctan2(np.imag(z), np.real(z))
 
-def psi_real_to_circle(lmbda_real, c0_real, c1_real, n=100, regularized=False):
+# pts are assumed to be on real line
+def psi_real_to_circle(lmbda_real, c0_real, c1_real, pts=None, regularized=False):
     assert(lmbda_real.periodic_domain is None)
     
     atoms_circle = mobius_inv(lmbda_real.atoms)
@@ -30,7 +31,14 @@ def psi_real_to_circle(lmbda_real, c0_real, c1_real, n=100, regularized=False):
         atom_wts_circle = np.insert(atom_wts_circle, 0, c1_real/np.pi)
     
     density_circle = None if lmbda_real.density is None else lambda x: lmbda_real.density(mobius(x))
-    quad_pts, quad_wts = fourier_quad(-np.pi, np.pi, n)
+    if pts is None:
+        pts = len(lmbda_real.quad_pts)
+    if np.isscalar(pts):
+        # if only number of quadrature points passed in, use equispaced points on the circle with equal weights
+        quad_pts, quad_wts = fourier_quad(-np.pi, np.pi, pts)
+    else:
+        # if position of quadrature points passed in, use inverse Mobius transform of these points on the circle with trapezoid weighting
+        quad_pts, quad_wts = trap_quad_gen(mobius_inv(pts))
     
     c0_circle = -c0_real/np.pi
     if not regularized:
@@ -39,7 +47,8 @@ def psi_real_to_circle(lmbda_real, c0_real, c1_real, n=100, regularized=False):
     lmbda_circle = Distribution(analytic_density=density_circle, atoms=atoms_circle, atom_wts=atom_wts_circle, quad_pts=quad_pts, quad_wts=quad_wts, zero_sets=None, full_support=lmbda_real.full_support, periodic_domain=(-np.pi, np.pi))
     return lmbda_circle, c0_circle
 
-def psi_inv_circle_to_real(lmbda_circle, c0_circle, quad_pts, quad_wts, regularized=False):
+# pts are assumed to be on real line
+def psi_inv_circle_to_real(lmbda_circle, c0_circle, pts=None, regularized=False):
     assert(lmbda_circle.periodic_domain == (-np.pi, np.pi))
     
     delta_at_minus_pi = lmbda_circle.num_atoms > 0 and np.isclose(lmbda_circle.atoms[0], -np.pi)
@@ -59,6 +68,9 @@ def psi_inv_circle_to_real(lmbda_circle, c0_circle, quad_pts, quad_wts, regulari
     atom_wts_real *= math.pi * (atoms_real**2 + 1)
     density_real = None if lmbda_circle.density is None else lambda x: lmbda_circle.density(mobius_inv(x))
     
+    if pts is None:
+        pts = mobius(lmbda_circle.quad_pts)
+    quad_pts, quad_wts = trap_quad_gen(pts)
     lmbda_real = Distribution(analytic_density=density_real, atoms=atoms_real, atom_wts=atom_wts_real, quad_pts=quad_pts, quad_wts=quad_wts, zero_sets=None, full_support=lmbda_circle.full_support, periodic_domain=None)
     
     c0_real = -np.pi*c0_circle
@@ -217,7 +229,7 @@ def B_circle(lmbda, c0, H=None, compute_mu=True, thresh=1e-15):
     return zeta0
 
 def B_reg(lmbda, c0, c1, thresh=1e-15):
-    lmbda_circle, c0_circle = psi_real_to_circle(lmbda, c0, c1, len(lmbda.quad_pts), regularized=True)
+    lmbda_circle, c0_circle = psi_real_to_circle(lmbda, c0, c1, lmbda.quad_pts, regularized=True)
     mu_circle, zeta0_circle = B_circle(lmbda_circle, c0_circle)
-    mu, zeta0, zeta1 = psi_inv_circle_to_real(mu_circle, zeta0_circle, lmbda.quad_pts, lmbda.quad_wts, regularized=True)
+    mu, zeta0, zeta1 = psi_inv_circle_to_real(mu_circle, zeta0_circle, lmbda.quad_pts, regularized=True)
     return mu, zeta0, zeta1

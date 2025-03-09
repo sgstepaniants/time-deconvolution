@@ -48,6 +48,7 @@ def plot_circle_distribution_3D(ax, lmbda, width = 2*np.pi, atom_scale = lambda 
     ax.set_ylim(-width, width)
     ax.set_aspect('equal')
     
-def plot_discrete(ax, t, x, color="blue", linewidth=1, linestyle='-'):
+def plot_discrete(ax, t, x, color="blue", linewidth=1, linestyle='-', label=None):
     for i in range(len(t)):
-        ax.plot([t[i]-0.5, t[i]+0.5], [x[i], x[i]], color=color, linewidth=linewidth, linestyle=linestyle)
+        curr_label = label if i == 0 else None
+        ax.plot([t[i]-0.5, t[i]+0.5], [x[i], x[i]], color=color, linewidth=linewidth, linestyle=linestyle, label=curr_label)

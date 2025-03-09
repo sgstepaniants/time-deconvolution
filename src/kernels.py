@@ -6,29 +6,30 @@ import torch.optim as optim
 def exp_kernel(lmbda, t, deriv_order=0):
     kernel = np.zeros(len(t))
     if lmbda.num_atoms > 0:
-        inds = np.logical_and(np.isfinite(lmbda.atoms_wts), lmbda.atoms_wts != 0)
+        inds = np.logical_and(np.isfinite(lmbda.atom_wts), lmbda.atom_wts != 0)
         kernel += np.sum(lmbda.atom_wts[inds]*(-lmbda.atoms[inds])**deriv_order*np.exp(-lmbda.atoms[inds]*t[:, None]), axis=1)
     if lmbda.density is not None:
-        inds = np.isfinite(lmbda.density_vals)
+        inds = np.logical_and(np.isfinite(lmbda.density_vals), lmbda.density_vals != 0)
         kernel += np.sum(lmbda.quad_wts[inds]*(-lmbda.quad_pts[inds])**deriv_order*lmbda.density_vals[inds]*np.exp(-lmbda.quad_pts[inds]*t[:, None]), axis=1)
     return kernel
 
 def complex_exp_kernel(lmbda, t, deriv_order=0):
     kernel = np.zeros(len(t), dtype=np.complex128)
     if lmbda.num_atoms > 0:
-        inds = np.logical_and(np.isfinite(lmbda.atoms_wts), lmbda.atoms_wts != 0)
+        inds = np.logical_and(np.isfinite(lmbda.atom_wts), lmbda.atom_wts != 0)
         kernel += np.sum(lmbda.atom_wts*(-1j*lmbda.atoms)**deriv_order*np.exp(-1j*lmbda.atoms*t[:, None]), axis=1)
     if lmbda.density is not None:
-        inds = np.isfinite(lmbda.density_vals)
+        inds = np.logical_and(np.isfinite(lmbda.density_vals), lmbda.density_vals != 0)
         kernel += np.sum(lmbda.quad_wts[inds]*(-1j*lmbda.quad_pts[inds])**deriv_order*lmbda.density_vals[inds]*np.exp(-1j*lmbda.quad_pts[inds]*t[:, None]), axis=1)
     return kernel
 
 def complex_discrete_kernel(lmbda, t):
     kernel = np.zeros(len(t), dtype=np.complex128)
     if lmbda.num_atoms > 0:
+        inds = np.logical_and(np.isfinite(lmbda.atom_wts), lmbda.atom_wts != 0)
         kernel += np.sum(lmbda.atom_wts*np.exp(-1j*lmbda.atoms*t[:, None]), axis=1)
     if lmbda.density is not None:
-        inds = np.isfinite(lmbda.density_vals)
+        inds = np.logical_and(np.isfinite(lmbda.density_vals), lmbda.density_vals != 0)
         kernel += np.sum(lmbda.quad_wts[inds]*lmbda.density_vals[inds]*np.exp(-1j*lmbda.quad_pts[inds]*t[:, None]), axis=1)/(2*np.pi)
     return kernel
 
