@@ -41,26 +41,26 @@ def leggauss_quad(a, b, n):
     return quad_pts, quad_wts
 
 # time convolution with trapezoid rule, assuming output starts at 0
-def conv_trap(K, x, t):
+def conv_trap(K, x, t, sum=False, half_zero=False):
     Nt = len(t)
-    if len(K) != Nt:
-        Kp = np.zeros(Nt)
-        Kp[:len(K)] = np.copy(K)
-        K = Kp
-    dt = t[1] - t[0]
-    y = scipy.signal.convolve(np.pad(K, (Nt-1, 0)), x, mode='valid')*dt
-    y -= (K[0]*x/2 + x[0]*K/2)*dt
+    Kp = np.zeros(Nt, dtype=K.dtype)
+    Kp[:len(K)] = np.copy(K)
+    if half_zero:
+        Kp[0] /= 2
+    dt = 1 if sum else t[1] - t[0]
+    y = scipy.signal.convolve(np.pad(Kp, (Nt-1, 0)), x, mode='valid')*dt
+    y -= (Kp[0]*x/2 + x[0]*Kp/2)*dt
     return y
 
 # time convolution with left-hand rule, assuming output starts at 0
-def conv_fourier(K, x, t):
+def conv_fourier(K, x, t, sum=False, half_zero=False):
     Nt = len(t)
-    if len(K) != Nt:
-        Kp = np.zeros(Nt)
-        Kp[:len(K)] = np.copy(K)
-        K = Kp
-    dt = t[1] - t[0]
-    y = scipy.signal.convolve(np.pad(K, (Nt-1, 0)), x, mode='valid')*dt
+    Kp = np.zeros(Nt, dtype=K.dtype)
+    Kp[:len(K)] = np.copy(K)
+    if half_zero:
+        Kp[0] /= 2
+    dt = 1 if sum else t[1] - t[0]
+    y = scipy.signal.convolve(np.pad(Kp, (Nt-1, 0)), x, mode='valid')*dt
     return y
 
 # Solve y = c0x + K*x for x, expects that y(0) is close to or exactly 0

@@ -153,7 +153,7 @@ class HilbertTransform:
                 #assert(np.isclose(self.lmbda.periodic_domain[1]-self.lmbda.quad_pts[-1], dx))
                 #self.H_cont = fourier_hilbert_transform(self.lmbda.density_vals, self.lmbda.quad_pts)
                 
-                # Use AAA rational approximation if domain is periodic
+                # Use AAA rational approximation
                 self.H_cont = continuous_periodic_hilbert_transform(self.lmbda.density(self.aaa_samples), self.aaa_samples, self.aaa_iters, self.lmbda.periodic_domain)
     
     def __call__(self, x):

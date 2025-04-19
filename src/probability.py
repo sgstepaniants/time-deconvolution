@@ -1,4 +1,5 @@
 import numpy as np
+from collections import Counter
 
 from .aaa_algorithms import aaa, barycentric_representation
 
@@ -42,6 +43,13 @@ def symmetrize_dist(a, b, halve_center=False):
         symm_b = np.concatenate((np.flip(symm_b), symm_b))/2
     return symm_a, symm_b
 
+def remove_duplicates_and_count(input_list):
+    """Removes duplicates from a list and counts element occurrences."""
+    counts = Counter(input_list)
+    unique_list = list(counts.keys())
+    return unique_list, counts
+
+# IF DENSITY NOT NONE, ATOM AT -1 NOT FOUND!
 # allow users to pass in an analytic Hilbert transform of lambda
 # allow users to depend on the aaa reconstruction of the density (with the density thresholded below some thresh)
 class Distribution:
@@ -49,11 +57,24 @@ class Distribution:
         assert(len(quad_pts) == len(quad_wts))
         assert(len(atoms) == len(atom_wts))
         
-        sorted_inds = np.argsort(atoms)
-        sorted_inds = sorted_inds[atom_wts[sorted_inds] != 0]
-        self.atoms = atoms[sorted_inds].astype(np.float64)
+        # Combine weights for atoms that are close to each other
+        atom_dict = {}
+        for atom, weight in zip(atoms, atom_wts):
+            if weight != 0:
+                # Check if this atom is close to any existing atom
+                found_close = False
+                for existing_atom in atom_dict:
+                    if np.isclose(atom, existing_atom):
+                        atom_dict[existing_atom] += weight
+                        found_close = True
+                        break
+                if not found_close:
+                    atom_dict[atom] = weight
+        
+        # Convert to sorted arrays
+        self.atoms = np.array(sorted(atom_dict.keys())).astype(np.float64)
         self.num_atoms = len(self.atoms)
-        self.atom_wts = atom_wts[sorted_inds]
+        self.atom_wts = np.array([atom_dict[atom] for atom in self.atoms])
         
         sorted_inds = np.argsort(quad_pts)
         sorted_inds = sorted_inds[quad_wts[sorted_inds] != 0]

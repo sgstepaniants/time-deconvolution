@@ -52,3 +52,8 @@ def plot_discrete(ax, t, x, color="blue", linewidth=1, linestyle='-', label=None
     for i in range(len(t)):
         curr_label = label if i == 0 else None
         ax.plot([t[i]-0.5, t[i]+0.5], [x[i], x[i]], color=color, linewidth=linewidth, linestyle=linestyle, label=curr_label)
+
+def plot_cont_discrete(ax, t, x, color="blue", linewidth=1, s=12, label=None):
+    ax.scatter(t[x != 0], x[x != 0], marker='o', color=color, s=s, label=label)
+    ax.vlines(t[x != 0], ymin=0, ymax=x[x != 0], color=color, linewidth=linewidth)
+    ax.hlines(0, xmin=t[0], xmax=t[-1], color=color, linewidth=linewidth)

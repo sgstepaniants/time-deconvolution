@@ -3,6 +3,11 @@ import numpy as np
 import torch
 import torch.optim as optim
 
+from pykeops.numpy import LazyTensor
+
+def exp_mul(wts, alphas, t):
+    return np.sum(wts[:, None]*np.exp(alphas[:, None]*t[None, :]), axis=0)
+
 def exp_kernel(lmbda, t, deriv_order=0):
     kernel = np.zeros(len(t))
     if lmbda.num_atoms > 0:
@@ -23,14 +28,21 @@ def complex_exp_kernel(lmbda, t, deriv_order=0):
         kernel += np.sum(lmbda.quad_wts[inds]*(-1j*lmbda.quad_pts[inds])**deriv_order*lmbda.density_vals[inds]*np.exp(-1j*lmbda.quad_pts[inds]*t[:, None]), axis=1)
     return kernel
 
-def complex_discrete_kernel(lmbda, t):
+def complex_discrete_kernel(lmbda, t, use_fft=True):
     kernel = np.zeros(len(t), dtype=np.complex128)
     if lmbda.num_atoms > 0:
         inds = np.logical_and(np.isfinite(lmbda.atom_wts), lmbda.atom_wts != 0)
         kernel += np.sum(lmbda.atom_wts*np.exp(-1j*lmbda.atoms*t[:, None]), axis=1)
     if lmbda.density is not None:
-        inds = np.logical_and(np.isfinite(lmbda.density_vals), lmbda.density_vals != 0)
-        kernel += np.sum(lmbda.quad_wts[inds]*lmbda.density_vals[inds]*np.exp(-1j*lmbda.quad_pts[inds]*t[:, None]), axis=1)/(2*np.pi)
+        if use_fft:
+            dx = lmbda.quad_pts[1] - lmbda.quad_pts[0]
+            assert(np.allclose(np.diff(lmbda.quad_pts), dx))
+            assert(lmbda.quad_pts[0] == lmbda.periodic_domain[0])
+            assert(np.isclose(lmbda.periodic_domain[1]-lmbda.quad_pts[-1], dx))
+            kernel += np.fft.rfft(lmbda.density_vals)/(2*np.pi)
+        else:
+            inds = np.logical_and(np.isfinite(lmbda.density_vals), lmbda.density_vals != 0)
+            kernel += np.sum(lmbda.quad_wts[inds]*lmbda.density_vals[inds]*np.exp(-1j*lmbda.quad_pts[inds]*t[:, None]), axis=1)/(2*np.pi)
     return kernel
 
 # Invert the Volterra equation y = c1*xdot - c0*x - K*x
