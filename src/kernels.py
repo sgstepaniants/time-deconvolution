@@ -39,7 +39,10 @@ def complex_discrete_kernel(lmbda, t, use_fft=True):
             assert(np.allclose(np.diff(lmbda.quad_pts), dx))
             assert(lmbda.quad_pts[0] == lmbda.periodic_domain[0])
             assert(np.isclose(lmbda.periodic_domain[1]-lmbda.quad_pts[-1], dx))
-            kernel += np.fft.rfft(lmbda.density_vals)/(2*np.pi)
+            assert(len(t) == len(lmbda.quad_pts))
+            vals = np.fft.ifftshift(lmbda.density_vals)
+            k1 = np.fft.fftshift(np.fft.fft(vals)/(2*np.pi))/len(t)
+            kernel += k1
         else:
             inds = np.logical_and(np.isfinite(lmbda.density_vals), lmbda.density_vals != 0)
             kernel += np.sum(lmbda.quad_wts[inds]*lmbda.density_vals[inds]*np.exp(-1j*lmbda.quad_pts[inds]*t[:, None]), axis=1)/(2*np.pi)
